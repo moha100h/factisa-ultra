@@ -89,3 +89,17 @@ async def cancel_action(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.message.edit_text("❌ لغو شد.")
     await cb.answer()
+
+@router.message(F.text == "💾 بکاپ")
+async def btn_backup(message: Message, is_admin: bool):
+    if not is_admin:
+        await message.answer("❌ دسترسی ندارید!")
+        return
+    from app.services.backup import create_backup, cleanup_backups
+    await message.answer("⏳ در حال ساخت بکاپ...")
+    fp = await create_backup()
+    if fp:
+        await cleanup_backups()
+        await message.answer(f"✅ بکاپ ساخته شد!\n<code>{fp}</code>")
+    else:
+        await message.answer("❌ خطا در ساخت بکاپ!")
