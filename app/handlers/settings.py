@@ -36,6 +36,10 @@ def settings_menu() -> InlineKeyboardMarkup:
         text=f"💹 نرخ مالیات: {settings.TAX_RATE}%",
         callback_data="set:tax_rate"
     ))
+    kb.row(InlineKeyboardButton(
+        text="🖼 لوگوی شرکت",
+        callback_data="set:logo"
+    ))
     kb.row(InlineKeyboardButton(text="🔙 منوی اصلی", callback_data="nav:main"))
     return kb.as_markup()
 
@@ -180,3 +184,37 @@ async def save_tax_rate(message: Message, state: FSMContext):
     settings.TAX_RATE = value
     await state.clear()
     await message.answer(f"✅ نرخ مالیات به <b>{value}%</b> تغییر یافت.", reply_markup=settings_menu())
+
+# ─── Logo Upload ──────────────────────────────────────────────────────────────
+class LogoState(StatesGroup):
+    waiting_logo = State()
+
+
+@router.callback_query(F.data == "set:logo")
+async def ask_logo(cb: CallbackQuery, state: FSMContext):
+    await state.set_state(LogoState.waiting_logo)
+    has_logo = os.path.isfile(settings.LOGO_PATH)
+    status = "✅ لوگو آپلود شده" if has_logo else "❌ لوگو ندارید"
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="❌ لغو", callback_data="set:main")
+    ]])
+    await cb.message.edit_text(
+        f"🖼 <b>لوگوی شرکت</b>\n\nوضعیت: {status}\n\nتصویر لوگو را ارسال کنید (PNG/JPG):",
+        reply_markup=kb
+    )
+    await cb.answer()
+
+
+@router.message(LogoState.waiting_logo, F.photo)
+async def save_logo(message: Message, state: FSMContext):
+    photo = message.photo[-1]
+    file = await message.bot.get_file(photo.file_id)
+    os.makedirs(os.path.dirname(settings.LOGO_PATH), exist_ok=True)
+    await message.bot.download_file(file.file_path, destination=settings.LOGO_PATH)
+    await state.clear()
+    await message.answer("✅ لوگو با موفقیت ذخیره شد و در فاکتورها اعمال می‌شود.", reply_markup=settings_menu())
+
+
+@router.message(LogoState.waiting_logo)
+async def logo_wrong_type(message: Message):
+    await message.answer("❌ لطفاً یک تصویر (عکس) ارسال کنید.")
