@@ -5,7 +5,7 @@ from datetime import date
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable, Image
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.styles import ParagraphStyle
@@ -15,7 +15,6 @@ import jdatetime
 
 logger = logging.getLogger(__name__)
 
-# ---- Font discovery ----
 _SEARCH_DIRS = [
     "/app/fonts",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../fonts"),
@@ -69,7 +68,6 @@ def rtl(text) -> str:
 
 
 def to_jalali(d) -> str:
-    """Convert date/datetime/str to Jalali string like 1403/02/15"""
     try:
         if isinstance(d, str):
             d = date.fromisoformat(d[:10])
@@ -103,7 +101,7 @@ def P(text, bold=False, size=11, align="RIGHT") -> Paragraph:
     return Paragraph(rtl(str(text)), _style(bold, size, align))
 
 
-def generate_invoice_pdf(inv, company_name: str = "") -> bytes:
+def generate_invoice_pdf(inv, company_name: str = "", logo_path: str = "") -> bytes:
     ok = _register()
     if not ok:
         logger.warning("[PDF] Generating with fallback Helvetica font")
@@ -117,14 +115,23 @@ def generate_invoice_pdf(inv, company_name: str = "") -> bytes:
     )
     story = []
 
-    # ── Header ──────────────────────────────────────────────────
+    # ── Header: لوگو + نام شرکت + شماره فاکتور ──────────────────
+    logo_cell = Spacer(1, 1)
+    if logo_path and os.path.isfile(logo_path):
+        try:
+            logo_cell = Image(logo_path, width=2.5*cm, height=2.5*cm)
+        except Exception as e:
+            logger.warning(f"[PDF] Logo load failed: {e}")
+
     h = Table([[
         P(f"شماره فاکتور: {inv.invoice_number}", bold=True, size=12, align="LEFT"),
-        P(company_name or "FacTisa Ultra", bold=True, size=14, align="RIGHT"),
-    ]], colWidths=[W*0.45, W*0.55])
+        P(company_name or "FacTisa Ultra", bold=True, size=14, align="CENTER"),
+        logo_cell,
+    ]], colWidths=[W*0.40, W*0.40, W*0.20])
     h.setStyle(TableStyle([
         ("VALIGN",        (0,0),(-1,-1), "MIDDLE"),
         ("BOTTOMPADDING", (0,0),(-1,-1), 8),
+        ("ALIGN",         (2,0),(2,0),   "RIGHT"),
     ]))
     story += [
         h,
@@ -150,12 +157,12 @@ def generate_invoice_pdf(inv, company_name: str = "") -> bytes:
 
     # ── Items table ─────────────────────────────────────────────
     headers = [
-        P("جمع کل",      bold=True, size=10, align="CENTER"),
-        P("قیمت واحد",  bold=True, size=10, align="CENTER"),
-        P("واحد",        bold=True, size=10, align="CENTER"),
-        P("تعداد",       bold=True, size=10, align="CENTER"),
-        P("شرح",         bold=True, size=10, align="CENTER"),
-        P("ردیف",         bold=True, size=10, align="CENTER"),
+        P("جمع کل",     bold=True, size=10, align="CENTER"),
+        P("قیمت واحد", bold=True, size=10, align="CENTER"),
+        P("واحد",       bold=True, size=10, align="CENTER"),
+        P("تعداد",      bold=True, size=10, align="CENTER"),
+        P("شرح",        bold=True, size=10, align="CENTER"),
+        P("ردیف",        bold=True, size=10, align="CENTER"),
     ]
     rows = [headers]
     for i, item in enumerate(inv.items or [], 1):
@@ -192,31 +199,64 @@ def generate_invoice_pdf(inv, company_name: str = "") -> bytes:
     remaining  = total - paid
 
     tot = Table([
-        [P(fmt_money(subtotal),   size=11),        P("جمع کل:",              bold=True, size=11)],
-        [P(fmt_money(discount),   size=11),        P("تخفیف:",              bold=True, size=11)],
-        [P(fmt_money(tax_amount), size=11),        P(f"مالیات ({tax_rate}%):", bold=True, size=11)],
-        [P(fmt_money(total),      bold=True, size=12), P("مبلغ نهایی:",       bold=True, size=12)],
-        [P(fmt_money(paid),       size=11),        P("پرداخت شده:",       bold=True, size=11)],
-        [P(fmt_money(remaining),  bold=True, size=12), P("مانده:",              bold=True, size=12)],
+        [P(fmt_money(subtotal),   size=11),            P("جمع کل:",               bold=True, size=11)],
+        [P(fmt_money(discount),   size=11),            P("تخفیف:",               bold=True, size=11)],
+        [P(fmt_money(tax_amount), size=11),            P(f"مالیات ({tax_rate}%):", bold=True, size=11)],
+        [P(fmt_money(total),      bold=True, size=12), P("مبلغ نهایی:",            bold=True, size=12)],
+        [P(fmt_money(paid),       size=11),            P("پرداخت شده:",          bold=True, size=11)],
+        [P(fmt_money(remaining),  bold=True, size=12), P("مانده:",                 bold=True, size=12)],
     ], colWidths=[4*cm, 4.5*cm], hAlign="RIGHT")
     tot.setStyle(TableStyle([
         ("ALIGN",         (0,0),(-1,-1), "RIGHT"),
         ("VALIGN",        (0,0),(-1,-1), "MIDDLE"),
         ("BOTTOMPADDING", (0,0),(-1,-1), 5),
-        ("TOPPADDING",    (0,0),(-1,-1), 5),
-        ("BACKGROUND",    (0,3),(-1,3),  colors.HexColor("#e8edff")),
-        ("BACKGROUND",    (0,5),(-1,5),  colors.HexColor("#ffe8e8")),
-        ("LINEABOVE",     (0,3),(-1,3),  1, colors.HexColor("#4361ee")),
+        ("TOPPADDING",    (0,0),(-1,-1), 3),
         ("LINEBELOW",     (0,3),(-1,3),  1, colors.HexColor("#4361ee")),
     ]))
-    story.append(tot)
+    story += [tot, Spacer(1, 0.4*cm)]
 
-    if getattr(inv, "notes", None):
+    # ── Notes ────────────────────────────────────────────────────
+    if inv.notes:
         story += [
-            Spacer(1, 0.4*cm),
-            HRFlowable(width="100%", thickness=0.5, color=colors.grey),
-            P(inv.notes, size=10),
+            HRFlowable(width="100%", thickness=0.5,
+                       color=colors.HexColor("#cccccc"), spaceAfter=4),
+            P(f"توضیحات: {inv.notes}", size=10),
+            Spacer(1, 0.3*cm),
         ]
+
+    # ── محل مهر و امضا ───────────────────────────────────────────
+    story += [
+        Spacer(1, 1.5*cm),
+        HRFlowable(width="100%", thickness=0.5,
+                   color=colors.HexColor("#cccccc"), spaceAfter=10),
+    ]
+
+    sig_header = Table([[
+        P("امضای خریدار", bold=True, size=10, align="CENTER"),
+        P("مهر و امضای فروشنده", bold=True, size=10, align="CENTER"),
+    ]], colWidths=[W*0.5, W*0.5])
+    sig_header.setStyle(TableStyle([
+        ("ALIGN",  (0,0),(-1,-1), "CENTER"),
+        ("VALIGN", (0,0),(-1,-1), "MIDDLE"),
+    ]))
+    story.append(sig_header)
+    story.append(Spacer(1, 1.8*cm))
+
+    sig_lines = Table([[
+        Table([[Spacer(1,1)]], colWidths=[W*0.38],
+              style=TableStyle([
+                  ("LINEABOVE", (0,0),(0,0), 1, colors.HexColor("#555555")),
+              ])),
+        Spacer(W*0.04, 1),
+        Table([[Spacer(1,1)]], colWidths=[W*0.38],
+              style=TableStyle([
+                  ("LINEABOVE", (0,0),(0,0), 1, colors.HexColor("#555555")),
+              ])),
+    ]], colWidths=[W*0.38, W*0.24, W*0.38])
+    sig_lines.setStyle(TableStyle([
+        ("VALIGN", (0,0),(-1,-1), "BOTTOM"),
+    ]))
+    story.append(sig_lines)
 
     doc.build(story)
     return buf.getvalue()
