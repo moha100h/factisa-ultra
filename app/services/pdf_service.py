@@ -1,146 +1,177 @@
 import io
 import os
+import logging
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from bidi.algorithm import get_display
 import arabic_reshaper
 
-# Font paths — first check /app/fonts (Docker), then relative path
-_BASE = os.path.dirname(__file__)
-_CANDIDATES = [
+logger = logging.getLogger(__name__)
+
+# ---- Font paths ----
+_SEARCH_DIRS = [
     "/app/fonts",
-    os.path.join(_BASE, "../../fonts"),
-    os.path.join(_BASE, "../../../fonts"),
+    os.path.join(os.path.dirname(__file__), "../../fonts"),
+    os.path.join(os.path.dirname(__file__), "../../../fonts"),
+    os.path.join(os.getcwd(), "fonts"),
 ]
 
-FONT = None
-FONT_B = None
-for _d in _CANDIDATES:
-    _f = os.path.join(_d, "Vazir.ttf")
-    _fb = os.path.join(_d, "Vazir-Bold.ttf")
-    if os.path.exists(_f) and os.path.getsize(_f) > 10000:
-        FONT = _f
-    if os.path.exists(_fb) and os.path.getsize(_fb) > 10000:
-        FONT_B = _fb
-    if FONT and FONT_B:
-        break
+def _find_font(name: str) -> str | None:
+    for d in _SEARCH_DIRS:
+        p = os.path.join(d, name)
+        if os.path.isfile(p) and os.path.getsize(p) > 50_000:
+            return p
+    return None
 
-_FONTS_REGISTERED = False
+_VAZIR = _find_font("Vazir.ttf")
+_VAZIR_BOLD = _find_font("Vazir-Bold.ttf")
+_REGISTERED = False
+
+logger.info(f"[PDF] Vazir={_VAZIR}  Vazir-Bold={_VAZIR_BOLD}")
 
 
-def _reg():
-    global _FONTS_REGISTERED
-    if _FONTS_REGISTERED:
+def _register_fonts():
+    global _REGISTERED
+    if _REGISTERED:
         return
-    if FONT and FONT_B:
-        try:
-            pdfmetrics.registerFont(TTFont("Vazir", FONT))
-            pdfmetrics.registerFont(TTFont("Vazir-Bold", FONT_B))
-            _FONTS_REGISTERED = True
-        except Exception as e:
-            print(f"[PDF] Font registration failed: {e}")
-    else:
-        print(f"[PDF] Vazir fonts not found! Searched: {_CANDIDATES}")
-        print(f"[PDF] FONT={FONT}, FONT_B={FONT_B}")
+    if not _VAZIR or not _VAZIR_BOLD:
+        logger.error(f"[PDF] Fonts NOT found in: {_SEARCH_DIRS}")
+        return
+    try:
+        pdfmetrics.registerFont(TTFont("Vazir", _VAZIR))
+        pdfmetrics.registerFont(TTFont("Vazir-Bold", _VAZIR_BOLD))
+        pdfmetrics.registerFontFamily(
+            "Vazir",
+            normal="Vazir",
+            bold="Vazir-Bold",
+        )
+        _REGISTERED = True
+        logger.info("[PDF] Vazir fonts registered OK")
+    except Exception as e:
+        logger.error(f"[PDF] Font registration error: {e}")
 
 
-def rtl(t: str) -> str:
-    if not t:
-        return ""
-    return get_display(arabic_reshaper.reshape(str(t)))
-
-
-def _font(bold=False) -> str:
-    """Return font name — Vazir if available, else Helvetica."""
-    if _FONTS_REGISTERED:
+def _fn(bold=False) -> str:
+    if _REGISTERED:
         return "Vazir-Bold" if bold else "Vazir"
     return "Helvetica-Bold" if bold else "Helvetica"
 
 
-def fmt(n) -> str:
+def rtl(text) -> str:
+    """Reshape + bidi for correct Persian/Arabic display in PDF."""
+    if not text:
+        return ""
+    s = str(text)
+    reshaped = arabic_reshaper.reshape(s)
+    return get_display(reshaped)
+
+
+def fmt_money(n) -> str:
     try:
-        return f"{float(n):,.0f} \u062a"
+        return f"{float(n):,.0f}"
     except Exception:
         return str(n)
 
 
+def _para_style(bold=False, size=11, align="RIGHT") -> ParagraphStyle:
+    return ParagraphStyle(
+        name=f"fa_{'b' if bold else 'n'}_{size}",
+        fontName=_fn(bold),
+        fontSize=size,
+        alignment={"RIGHT": 2, "LEFT": 0, "CENTER": 1}.get(align, 2),
+        leading=size * 1.6,
+        wordWrap="RTL",
+    )
+
+
 def generate_invoice_pdf(inv, company_name: str = "") -> bytes:
-    _reg()
+    _register_fonts()
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        rightMargin=2 * cm, leftMargin=2 * cm,
-        topMargin=2 * cm, bottomMargin=2 * cm
+        buf,
+        pagesize=A4,
+        rightMargin=2 * cm,
+        leftMargin=2 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
     )
-    fb = _font(bold=True)
-    fn = _font(bold=False)
+
     story = []
+    W = 17 * cm  # usable width
 
-    # Header
-    ht = Table(
-        [[rtl(company_name or "FacTisa Ultra"), rtl(f"شماره فاکتور: {inv.invoice_number}")]],
-        colWidths=[9 * cm, 8 * cm]
-    )
-    ht.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), fb),
-        ("FONTSIZE", (0, 0), (-1, -1), 14),
-        ("ALIGN", (0, 0), (0, 0), "LEFT"),
-        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-        ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#1a1a2e")),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    # ── Header ──────────────────────────────────────────────
+    header_data = [[
+        Paragraph(rtl(f"شماره فاکتور: {inv.invoice_number}"), _para_style(bold=True, size=13, align="LEFT")),
+        Paragraph(rtl(company_name or "FacTisa Ultra"), _para_style(bold=True, size=14, align="RIGHT")),
+    ]]
+    header_tbl = Table(header_data, colWidths=[W * 0.45, W * 0.55])
+    header_tbl.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
     ]))
-    story += [ht, HRFlowable(width="100%", thickness=2, color=colors.HexColor("#4361ee")), Spacer(1, .4 * cm)]
+    story.append(header_tbl)
+    story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor("#4361ee"), spaceAfter=8))
 
-    # Client info
+    # ── Client info ─────────────────────────────────────────
     client_name = inv.client.name if inv.client else "—"
     date_str = str(inv.created_at)[:10] if inv.created_at else "—"
-    it = Table([
-        [rtl("مشتری:"), rtl(client_name)],
-        [rtl("تاریخ:"), rtl(date_str)],
-        [rtl("وضعیت:"), rtl(str(inv.status.value if hasattr(inv.status, 'value') else inv.status))],
-    ], colWidths=[4 * cm, 13 * cm])
-    it.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (0, -1), fb),
-        ("FONTNAME", (1, 0), (1, -1), fn),
-        ("FONTSIZE", (0, 0), (-1, -1), 11),
+    status_val = inv.status.value if hasattr(inv.status, "value") else str(inv.status)
+
+    info_rows = [
+        [Paragraph(rtl(client_name), _para_style(size=11)), Paragraph(rtl("مشتری:"), _para_style(bold=True, size=11))],
+        [Paragraph(rtl(date_str), _para_style(size=11)), Paragraph(rtl("تاریخ:"), _para_style(bold=True, size=11))],
+        [Paragraph(rtl(status_val), _para_style(size=11)), Paragraph(rtl("وضعیت:"), _para_style(bold=True, size=11))],
+    ]
+    info_tbl = Table(info_rows, colWidths=[W * 0.7, W * 0.3])
+    info_tbl.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
-    story += [it, Spacer(1, .4 * cm)]
+    story.append(info_tbl)
+    story.append(Spacer(1, 0.4 * cm))
 
-    # Items table
-    headers = [rtl("ردیف"), rtl("شرح"), rtl("تعداد"), rtl("واحد"), rtl("قیمت واحد"), rtl("جمع کل")]
-    rows = [headers]
+    # ── Items table ─────────────────────────────────────────
+    col_headers = [
+        Paragraph(rtl("جمع کل"), _para_style(bold=True, size=10, align="CENTER")),
+        Paragraph(rtl("قیمت واحد"), _para_style(bold=True, size=10, align="CENTER")),
+        Paragraph(rtl("واحد"), _para_style(bold=True, size=10, align="CENTER")),
+        Paragraph(rtl("تعداد"), _para_style(bold=True, size=10, align="CENTER")),
+        Paragraph(rtl("شرح"), _para_style(bold=True, size=10, align="CENTER")),
+        Paragraph(rtl("ردیف"), _para_style(bold=True, size=10, align="CENTER")),
+    ]
+    rows = [col_headers]
     for idx, item in enumerate(inv.items or [], 1):
         rows.append([
-            str(idx),
-            rtl(item.description or ""),
-            str(item.quantity),
-            rtl(item.unit or "عدد"),
-            fmt(item.unit_price),
-            fmt(item.total),
+            Paragraph(fmt_money(item.total), _para_style(size=10, align="CENTER")),
+            Paragraph(fmt_money(item.unit_price), _para_style(size=10, align="CENTER")),
+            Paragraph(rtl(item.unit or "عدد"), _para_style(size=10, align="CENTER")),
+            Paragraph(str(item.quantity), _para_style(size=10, align="CENTER")),
+            Paragraph(rtl(item.description or ""), _para_style(size=10, align="RIGHT")),
+            Paragraph(str(idx), _para_style(size=10, align="CENTER")),
         ])
-    tbl = Table(rows, colWidths=[1.2 * cm, 5.5 * cm, 1.8 * cm, 1.8 * cm, 3.2 * cm, 3.5 * cm])
-    tbl.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, 0), fb),
-        ("FONTNAME", (0, 1), (-1, -1), fn),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+
+    col_widths = [3.2 * cm, 3.0 * cm, 1.6 * cm, 1.6 * cm, 5.6 * cm, 1.5 * cm]
+    items_tbl = Table(rows, colWidths=col_widths, repeatRows=1)
+    items_tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4361ee")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f0f4ff")]),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
-    story += [tbl, Spacer(1, .5 * cm)]
+    story.append(items_tbl)
+    story.append(Spacer(1, 0.5 * cm))
 
-    # Totals
+    # ── Totals ───────────────────────────────────────────────
     subtotal = sum(i.total for i in (inv.items or []))
     discount = inv.discount or 0
     tax_rate = inv.tax_rate or 0
@@ -149,26 +180,32 @@ def generate_invoice_pdf(inv, company_name: str = "") -> bytes:
     paid = sum(p.amount for p in (inv.payments or []))
     remaining = total - paid
 
-    totals = Table([
-        [rtl("جمع کل:"), fmt(subtotal)],
-        [rtl("تخفیف:"), fmt(discount)],
-        [rtl(f"مالیات ({tax_rate}%):"), fmt(tax_amount)],
-        [rtl("مبلغ نهایی:"), fmt(total)],
-        [rtl("پرداخت شده:"), fmt(paid)],
-        [rtl("مانده:"), fmt(remaining)],
-    ], colWidths=[5 * cm, 4 * cm], hAlign="RIGHT")
-    totals.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (0, -1), fb),
-        ("FONTNAME", (1, 0), (1, -1), fn),
-        ("FONTSIZE", (0, 0), (-1, -1), 11),
+    totals_data = [
+        [Paragraph(fmt_money(subtotal), _para_style(size=11)), Paragraph(rtl("جمع کل:"), _para_style(bold=True, size=11))],
+        [Paragraph(fmt_money(discount), _para_style(size=11)), Paragraph(rtl("تخفیف:"), _para_style(bold=True, size=11))],
+        [Paragraph(fmt_money(tax_amount), _para_style(size=11)), Paragraph(rtl(f"مالیات ({tax_rate}%):"), _para_style(bold=True, size=11))],
+        [Paragraph(fmt_money(total), _para_style(bold=True, size=12)), Paragraph(rtl("مبلغ نهایی:"), _para_style(bold=True, size=12))],
+        [Paragraph(fmt_money(paid), _para_style(size=11)), Paragraph(rtl("پرداخت شده:"), _para_style(bold=True, size=11))],
+        [Paragraph(fmt_money(remaining), _para_style(bold=True, size=12)), Paragraph(rtl("مانده:"), _para_style(bold=True, size=12))],
+    ]
+    totals_tbl = Table(totals_data, colWidths=[4 * cm, 4 * cm], hAlign="RIGHT")
+    totals_tbl.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
-        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e8edff")),
-        ("FONTNAME", (0, -1), (-1, -1), fb),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("LINEABOVE", (0, -1), (-1, -1), 1, colors.HexColor("#4361ee")),
+        ("BACKGROUND", (0, 3), (-1, 3), colors.HexColor("#e8edff")),
+        ("BACKGROUND", (0, 5), (-1, 5), colors.HexColor("#ffe8e8")),
+        ("LINEABOVE", (0, 3), (-1, 3), 1, colors.HexColor("#4361ee")),
+        ("LINEBELOW", (0, 3), (-1, 3), 1, colors.HexColor("#4361ee")),
     ]))
-    story.append(totals)
+    story.append(totals_tbl)
+
+    # ── Notes ────────────────────────────────────────────────
+    if getattr(inv, "notes", None):
+        story.append(Spacer(1, 0.4 * cm))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
+        story.append(Paragraph(rtl(inv.notes), _para_style(size=10)))
 
     doc.build(story)
     return buf.getvalue()
