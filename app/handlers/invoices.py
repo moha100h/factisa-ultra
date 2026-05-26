@@ -169,7 +169,7 @@ async def inv_pdf(cb: CallbackQuery, session: AsyncSession):
     if not inv: await cb.answer("یافت نشد!", show_alert=True); return
     from app.services.pdf_service import generate_invoice_pdf
     from app.core.config import settings
-    pdf_bytes = generate_invoice_pdf(inv, settings.COMPANY_NAME)
+    pdf_bytes = generate_invoice_pdf(inv, settings.COMPANY_NAME, settings.LOGO_PATH)
     await cb.message.answer_document(BufferedInputFile(pdf_bytes, filename=f"{inv.invoice_number}.pdf"), caption=f"📄 فاکتور {inv.invoice_number}")
     await cb.answer()
 
