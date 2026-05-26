@@ -9,6 +9,7 @@ from app.db.engine import init_db
 from app.middlewares.db import DbMiddleware
 from app.middlewares.auth import AuthMiddleware
 from app.handlers import start, clients, invoices, projects, workers, finance, reports
+from app.handlers import settings as settings_handler
 
 
 async def backup_scheduler(bot: Bot):
@@ -51,7 +52,8 @@ async def main():
 
     for router in [
         start.router, clients.router, invoices.router,
-        projects.router, workers.router, finance.router, reports.router
+        projects.router, workers.router, finance.router, reports.router,
+        settings_handler.router,
     ]:
         dp.include_router(router)
 
