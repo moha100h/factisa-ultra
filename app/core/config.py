@@ -17,10 +17,12 @@ class Settings:
     COMPANY_PHONE: str = os.getenv("COMPANY_PHONE", "")
     COMPANY_ADDRESS: str = os.getenv("COMPANY_ADDRESS", "")
     TAX_RATE: float = float(os.getenv("TAX_RATE", "9"))
+    LOGO_PATH: str = os.getenv("LOGO_PATH", "/app/data/logo.png")
 
     def __post_init__(self):
         ids = os.getenv("ADMIN_IDS", "")
         self.ADMIN_IDS = [int(i.strip()) for i in ids.split(",") if i.strip()]
+        os.makedirs(os.path.dirname(self.LOGO_PATH), exist_ok=True)
 
     def is_admin(self, uid: int) -> bool:
         return uid in self.ADMIN_IDS
