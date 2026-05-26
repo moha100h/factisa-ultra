@@ -1,0 +1,58 @@
+version: '3.9'
+
+services:
+  bot:
+    build: .
+    container_name: factisa_bot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - backups:/backups
+      - ./logs:/app/logs
+      - ./fonts:/app/fonts
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - factisa_net
+
+  db:
+    image: postgres:16-alpine
+    container_name: factisa_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ultra
+      POSTGRES_USER: ultra
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ultra_secret}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ultra -d ultra"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - factisa_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: factisa_redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - factisa_net
+
+volumes:
+  pgdata:
+  backups:
+
+networks:
+  factisa_net:
+    driver: bridge
