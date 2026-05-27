@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, BufferedInputFile
+from aiogram.types import Message, CallbackQuery, BufferedInputFile, InputMediaPhoto
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select
@@ -40,20 +40,40 @@ async def inv_view(cb: CallbackQuery, session: AsyncSession):
     inv_id = int(cb.data.split(":")[2])
     inv = await _load(session, inv_id)
     if not inv: await cb.answer("یافت نشد!", show_alert=True); return
-    S = {"draft":"📝 پیش‌نویس","sent":"📤 ارسال شده","paid":"✅ پرداخت شده","partial":"⚠️ جزئی","cancelled":"❌ لغو"}
+    from app.services.card_generator import make_invoice_card
+    from aiogram.types import InputMediaPhoto
+    S = {"draft":"📝 پیش‌نویس","sent":"📤 ارسال شده","paid":"✅ پرداخت شده",
+         "partial":"⚠️ جزئی","cancelled":"❌ لغو"}
     sv = inv.status.value if hasattr(inv.status,"value") else inv.status
-    items_text = "\n".join(f"  {i+1}. {it.description} | {it.quantity:g} {it.unit} × {it.unit_price:,.0f} = <b>{it.total:,.0f}</b>" for i,it in enumerate(inv.items))
-    await cb.message.edit_text(
-        f"📄 <b>فاکتور {inv.invoice_number}</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 وضعیت: {S.get(sv,sv)}\n👤 مشتری: <b>{inv.client.name if inv.client else '—'}</b>\n"
-        f"📅 تاریخ: {to_jalali(inv.created_at)}\n\n📋 <b>اقلام:</b>\n{items_text}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n💰 جمع: {fmt(inv.subtotal)}\n🎯 تخفیف: {fmt(inv.discount)}\n"
-        f"💸 مالیات ({inv.tax_rate}%): {fmt(inv.tax_amount)}\n💵 <b>نهایی: {fmt(inv.total)}</b>\n"
-        f"✅ پرداخت: {fmt(inv.paid_amount)}\n⚠️ <b>مانده: {fmt(inv.remaining)}</b>",
-        reply_markup=invoice_detail(inv.id, sv, inv.invoice_number)
+    subtotal   = sum(i.total for i in (inv.items or []))
+    discount   = inv.discount or 0
+    tax_rate   = inv.tax_rate or 0
+    tax_amount = (subtotal - discount) * tax_rate / 100
+    total      = subtotal - discount + tax_amount
+    paid       = sum(p.amount for p in (inv.payments or []))
+    remaining  = total - paid
+    caption = (
+        f"📄 <b>فاکتور {inv.invoice_number}</b>  |  {S.get(sv,sv)}\n"
+        f"👤 {inv.client.name if inv.client else '—'}  |  📅 {to_jalali(inv.created_at)}\n"
+        f"💰 کل: <b>{fmt(total)}</b>  |  ✅ پرداخت: {fmt(paid)}  |  ⚠️ مانده: <b>{fmt(remaining)}</b>"
     )
+    card = make_invoice_card(inv)
+    buf  = BufferedInputFile(card, filename="invoice.png")
+    try:
+        if cb.message.photo:
+            await cb.message.edit_media(
+                media=InputMediaPhoto(media=buf, caption=caption, parse_mode="HTML"),
+                reply_markup=invoice_detail(inv.id, sv, inv.invoice_number))
+        else:
+            await cb.message.delete()
+            await cb.message.answer_photo(
+                photo=buf, caption=caption, parse_mode="HTML",
+                reply_markup=invoice_detail(inv.id, sv, inv.invoice_number))
+    except Exception:
+        await cb.message.answer_photo(
+            photo=buf, caption=caption, parse_mode="HTML",
+            reply_markup=invoice_detail(inv.id, sv, inv.invoice_number))
     await cb.answer()
-
 @router.callback_query(F.data == "inv:new")
 async def inv_new(cb: CallbackQuery, state: FSMContext, session: AsyncSession):
     r = await session.execute(select(Client).order_by(Client.name))
