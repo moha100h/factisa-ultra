@@ -73,9 +73,40 @@ async def cmd_backup(message: Message, is_admin: bool):
 
 
 @router.callback_query(F.data == "nav:main")
-async def nav_main(cb: CallbackQuery, is_admin: bool):
-    await cb.message.delete()
-    await cb.message.answer("🏠 منوی اصلی:", reply_markup=main_menu(is_admin=is_admin))
+async def nav_main(cb: CallbackQuery, is_admin: bool, session):
+    from app.services.card_generator import make_dashboard_card
+    from app.db.models import Client, Project, Invoice, Worker, InvoiceStatus
+    from sqlalchemy import select, func
+    from aiogram.types import BufferedInputFile
+    try:
+        clients  = (await session.execute(select(func.count(Client.id)))).scalar() or 0
+        projects = (await session.execute(select(func.count(Project.id)))).scalar() or 0
+        invoices = (await session.execute(select(func.count(Invoice.id)))).scalar() or 0
+        workers  = (await session.execute(select(func.count(Worker.id)))).scalar() or 0
+        income   = (await session.execute(select(func.sum(Invoice.total)))).scalar() or 0
+        debt_r   = await session.execute(
+            select(func.sum(Invoice.total - Invoice.paid_amount))
+            .where(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
+        )
+        debt = debt_r.scalar() or 0
+        card = make_dashboard_card({"clients": clients, "projects": projects,
+                                    "invoices": invoices, "workers": workers,
+                                    "income": income, "debt": debt})
+        buf = BufferedInputFile(card, filename="dashboard.png")
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        await cb.message.answer_photo(
+            photo=buf, caption="📊 <b>داشبورد FacTisa Ultra</b>",
+            reply_markup=main_menu(is_admin=is_admin), parse_mode="HTML"
+        )
+    except Exception:
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        await cb.message.answer("🏠 منوی اصلی:", reply_markup=main_menu(is_admin=is_admin))
     await cb.answer()
 
 
