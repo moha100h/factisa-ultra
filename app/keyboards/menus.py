@@ -5,6 +5,14 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 
+def _btn(text: str, cb: str, color: str = None) -> InlineKeyboardButton:
+    """Helper: ساخت دکمه با رنگ اختیاری."""
+    kwargs = {"text": text, "callback_data": cb}
+    if color:
+        kwargs["color"] = color
+    return InlineKeyboardButton(**kwargs)
+
+
 def main_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardBuilder()
     kb.row(KeyboardButton(text="📄 فاکتورها"), KeyboardButton(text="👥 مشتریان"))
@@ -16,7 +24,9 @@ def main_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
 
 
 def back_btn(to: str = "nav:main") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 بازگشت", callback_data=to)]])
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        _btn("🔙 بازگشت", to)
+    ]])
 
 
 def invoice_list(invoices: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
@@ -25,20 +35,20 @@ def invoice_list(invoices: list, page: int = 0, per_page: int = 5) -> InlineKeyb
     S = {"draft": "📝", "sent": "📤", "paid": "✅", "partial": "⚠️", "cancelled": "❌"}
     for inv in invoices[start:start + per_page]:
         sv = inv.status.value if hasattr(inv.status, "value") else inv.status
-        kb.row(InlineKeyboardButton(
-            text=f"{S.get(sv, '📄')} {inv.invoice_number}  •  {inv.total:,.0f} ت",
-            callback_data=f"inv:view:{inv.id}"
+        kb.row(_btn(
+            f"{S.get(sv, '📄')} {inv.invoice_number}  •  {inv.total:,.0f} ت",
+            f"inv:view:{inv.id}"
         ))
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"inv:list:{page - 1}"))
-    nav.append(InlineKeyboardButton(text=f"📄 {page + 1}", callback_data="noop"))
+        nav.append(_btn("◀️", f"inv:list:{page - 1}"))
+    nav.append(_btn(f"📄 {page + 1}", "noop"))
     if start + per_page < len(invoices):
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"inv:list:{page + 1}"))
+        nav.append(_btn("▶️", f"inv:list:{page + 1}"))
     if nav:
         kb.row(*nav)
-    kb.row(InlineKeyboardButton(text="➕ فاکتور جدید", callback_data="inv:new"))
-    kb.row(InlineKeyboardButton(text="🔙 منوی اصلی", callback_data="nav:main"))
+    kb.row(_btn("➕ فاکتور جدید", "inv:new", "success"))
+    kb.row(_btn("🔙 منوی اصلی", "nav:main"))
     return kb.as_markup()
 
 
@@ -46,15 +56,17 @@ def invoice_detail(inv_id: int, status: str, inv_number: str) -> InlineKeyboardM
     kb = InlineKeyboardBuilder()
     if status in ("draft", "sent", "partial"):
         kb.row(
-            InlineKeyboardButton(text="💳 پرداخت", callback_data=f"inv:pay:{inv_id}"),
-            InlineKeyboardButton(text="📤 ارسال شد", callback_data=f"inv:send:{inv_id}")
+            _btn("💳 پرداخت",    f"inv:pay:{inv_id}",  "success"),
+            _btn("📤 ارسال شد",  f"inv:send:{inv_id}")
         )
     kb.row(
-        InlineKeyboardButton(text="📄 PDF", callback_data=f"inv:pdf:{inv_id}"),
-        InlineKeyboardButton(text="✅ پرداخت کامل", callback_data=f"inv:markpaid:{inv_id}")
+        _btn("📄 PDF",           f"inv:pdf:{inv_id}"),
+        _btn("✅ پرداخت کامل",   f"inv:markpaid:{inv_id}", "success")
     )
-    kb.row(InlineKeyboardButton(text="🗑 حذف", callback_data=f"inv:del:{inv_id}"),
-           InlineKeyboardButton(text="🔙 لیست", callback_data="inv:list:0"))
+    kb.row(
+        _btn("🗑 حذف",           f"inv:del:{inv_id}",  "danger"),
+        _btn("🔙 لیست",          "inv:list:0")
+    )
     return kb.as_markup()
 
 
@@ -63,30 +75,30 @@ def client_list(clients: list, page: int = 0, per_page: int = 7) -> InlineKeyboa
     start = page * per_page
     for c in clients[start:start + per_page]:
         label = f"👤 {c.name}" + (f"  ({c.company})" if c.company else "")
-        kb.row(InlineKeyboardButton(text=label, callback_data=f"cli:view:{c.id}"))
+        kb.row(_btn(label, f"cli:view:{c.id}"))
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"cli:list:{page - 1}"))
+        nav.append(_btn("◀️", f"cli:list:{page - 1}"))
     if start + per_page < len(clients):
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"cli:list:{page + 1}"))
+        nav.append(_btn("▶️", f"cli:list:{page + 1}"))
     if nav:
         kb.row(*nav)
-    kb.row(InlineKeyboardButton(text="➕ مشتری جدید", callback_data="cli:new"))
-    kb.row(InlineKeyboardButton(text="🔙 منوی اصلی", callback_data="nav:main"))
+    kb.row(_btn("➕ مشتری جدید", "cli:new", "success"))
+    kb.row(_btn("🔙 منوی اصلی",  "nav:main"))
     return kb.as_markup()
 
 
 def client_detail(cid: int, phone: str = "") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text="📄 فاکتورها", callback_data=f"cli:invoices:{cid}"),
-        InlineKeyboardButton(text="🏗 پروژه‌ها", callback_data=f"cli:projects:{cid}")
+        _btn("📄 فاکتورها", f"cli:invoices:{cid}"),
+        _btn("🏗 پروژه‌ها", f"cli:projects:{cid}")
     )
     kb.row(
-        InlineKeyboardButton(text="✏️ ویرایش", callback_data=f"cli:edit:{cid}"),
-        InlineKeyboardButton(text="🗑 حذف", callback_data=f"cli:del:{cid}")
+        _btn("✏️ ویرایش",  f"cli:edit:{cid}"),
+        _btn("🗑 حذف",     f"cli:del:{cid}", "danger")
     )
-    kb.row(InlineKeyboardButton(text="🔙 لیست مشتریان", callback_data="cli:list:0"))
+    kb.row(_btn("🔙 لیست مشتریان", "cli:list:0"))
     return kb.as_markup()
 
 
@@ -97,34 +109,34 @@ def project_list(projects: list, page: int = 0, per_page: int = 5) -> InlineKeyb
     for p in projects[start:start + per_page]:
         sv = p.status.value if hasattr(p.status, "value") else p.status
         label = f"{S.get(sv, '⚪')} {p.title}" + (f"  •  {p.budget:,.0f} ت" if p.budget else "")
-        kb.row(InlineKeyboardButton(text=label, callback_data=f"prj:view:{p.id}"))
+        kb.row(_btn(label, f"prj:view:{p.id}"))
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"prj:list:{page - 1}"))
+        nav.append(_btn("◀️", f"prj:list:{page - 1}"))
     if start + per_page < len(projects):
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"prj:list:{page + 1}"))
+        nav.append(_btn("▶️", f"prj:list:{page + 1}"))
     if nav:
         kb.row(*nav)
-    kb.row(InlineKeyboardButton(text="➕ پروژه جدید", callback_data="prj:new"))
-    kb.row(InlineKeyboardButton(text="🔙 منوی اصلی", callback_data="nav:main"))
+    kb.row(_btn("➕ پروژه جدید", "prj:new", "success"))
+    kb.row(_btn("🔙 منوی اصلی",  "nav:main"))
     return kb.as_markup()
 
 
 def project_detail(pid: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text="📄 فاکتورها", callback_data=f"prj:invoices:{pid}"),
-        InlineKeyboardButton(text="💸 هزینه‌ها", callback_data=f"prj:expenses:{pid}")
+        _btn("📄 فاکتورها",  f"prj:invoices:{pid}"),
+        _btn("💸 هزینه‌ها",  f"prj:expenses:{pid}")
     )
     kb.row(
-        InlineKeyboardButton(text="👷 کارگران", callback_data=f"prj:workers:{pid}"),
-        InlineKeyboardButton(text="📊 گزارش PDF", callback_data=f"prj:report:{pid}")
+        _btn("👷 کارگران",   f"prj:workers:{pid}"),
+        _btn("📊 گزارش PDF", f"prj:report:{pid}", "success")
     )
     kb.row(
-        InlineKeyboardButton(text="✏️ ویرایش", callback_data=f"prj:edit:{pid}"),
-        InlineKeyboardButton(text="🗑 حذف", callback_data=f"prj:del:{pid}")
+        _btn("✏️ ویرایش",   f"prj:edit:{pid}"),
+        _btn("🗑 حذف",      f"prj:del:{pid}", "danger")
     )
-    kb.row(InlineKeyboardButton(text="🔙 لیست پروژه‌ها", callback_data="prj:list:0"))
+    kb.row(_btn("🔙 لیست پروژه‌ها", "prj:list:0"))
     return kb.as_markup()
 
 
@@ -133,74 +145,74 @@ def worker_list(workers: list, page: int = 0, per_page: int = 7) -> InlineKeyboa
     start = page * per_page
     for w in workers[start:start + per_page]:
         icon = "🔴" if w.balance > 0 else "🟢"
-        kb.row(InlineKeyboardButton(
-            text=f"{icon} {w.name}  •  {w.skill or 'عمومی'}",
-            callback_data=f"wrk:view:{w.id}"
+        kb.row(_btn(
+            f"{icon} {w.name}  •  {w.skill or 'عمومی'}",
+            f"wrk:view:{w.id}"
         ))
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"wrk:list:{page - 1}"))
+        nav.append(_btn("◀️", f"wrk:list:{page - 1}"))
     if start + per_page < len(workers):
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"wrk:list:{page + 1}"))
+        nav.append(_btn("▶️", f"wrk:list:{page + 1}"))
     if nav:
         kb.row(*nav)
-    kb.row(InlineKeyboardButton(text="➕ کارگر جدید", callback_data="wrk:new"))
-    kb.row(InlineKeyboardButton(text="🔙 منوی اصلی", callback_data="nav:main"))
+    kb.row(_btn("➕ کارگر جدید", "wrk:new", "success"))
+    kb.row(_btn("🔙 منوی اصلی",  "nav:main"))
     return kb.as_markup()
 
 
 def worker_detail(wid: int, phone: str = "") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text="📋 ثبت کارکرد", callback_data=f"wrk:log:{wid}"),
-        InlineKeyboardButton(text="💳 پرداخت", callback_data=f"wrk:pay:{wid}")
+        _btn("📋 ثبت کارکرد", f"wrk:log:{wid}", "success"),
+        _btn("💳 پرداخت",     f"wrk:pay:{wid}", "success")
     )
     kb.row(
-        InlineKeyboardButton(text="✏️ ویرایش", callback_data=f"wrk:edit:{wid}"),
-        InlineKeyboardButton(text="🗑 حذف", callback_data=f"wrk:del:{wid}")
+        _btn("✏️ ویرایش",    f"wrk:edit:{wid}"),
+        _btn("🗑 حذف",       f"wrk:del:{wid}", "danger")
     )
-    kb.row(InlineKeyboardButton(text="🔙 لیست کارگران", callback_data="wrk:list:0"))
+    kb.row(_btn("🔙 لیست کارگران", "wrk:list:0"))
     return kb.as_markup()
 
 
 def finance_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text="💵 دریافتی‌ها", callback_data="fin:income"),
-        InlineKeyboardButton(text="💸 هزینه‌ها", callback_data="fin:expenses")
+        _btn("💵 دریافتی‌ها", "fin:income"),
+        _btn("💸 هزینه‌ها",   "fin:expenses")
     )
     kb.row(
-        InlineKeyboardButton(text="📊 سود/زیان", callback_data="fin:profit"),
-        InlineKeyboardButton(text="📋 بدهکاران", callback_data="fin:debtors")
+        _btn("📊 سود/زیان",   "fin:profit"),
+        _btn("📋 بدهکاران",   "fin:debtors")
     )
-    kb.row(InlineKeyboardButton(text="➕ ثبت هزینه", callback_data="exp:new:0"))
-    kb.row(InlineKeyboardButton(text="🔙 منوی اصلی", callback_data="nav:main"))
+    kb.row(_btn("➕ ثبت هزینه", "exp:new:0", "success"))
+    kb.row(_btn("🔙 منوی اصلی", "nav:main"))
     return kb.as_markup()
 
 
 def report_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text="📊 خلاصه مالی", callback_data="rep:summary"),
-        InlineKeyboardButton(text="📄 فاکتورها", callback_data="rep:invoices")
+        _btn("📊 خلاصه مالی", "rep:summary"),
+        _btn("📄 فاکتورها",   "rep:invoices")
     )
     kb.row(
-        InlineKeyboardButton(text="🏗 پروژه‌ها", callback_data="rep:projects"),
-        InlineKeyboardButton(text="👷 کارگران", callback_data="rep:workers")
+        _btn("🏗 پروژه‌ها",   "rep:projects"),
+        _btn("👷 کارگران",    "rep:workers")
     )
     kb.row(
-        InlineKeyboardButton(text="📅 ماهانه", callback_data="rep:monthly"),
-        InlineKeyboardButton(text="📆 سالانه", callback_data="rep:yearly")
+        _btn("📅 ماهانه",     "rep:monthly"),
+        _btn("📆 سالانه",     "rep:yearly")
     )
-    kb.row(InlineKeyboardButton(text="🔙 منوی اصلی", callback_data="nav:main"))
+    kb.row(_btn("🔙 منوی اصلی", "nav:main"))
     return kb.as_markup()
 
 
 def confirm_kb(action: str, item_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text="✅ بله، حذف شود", callback_data=f"confirm:{action}:{item_id}"),
-        InlineKeyboardButton(text="❌ خیر", callback_data=f"cancel:{action}:{item_id}")
+        _btn("✅ بله، حذف شود", f"confirm:{action}:{item_id}", "danger"),
+        _btn("❌ خیر",          f"cancel:{action}:{item_id}",  "success")
     )
     return kb.as_markup()
 
@@ -208,7 +220,22 @@ def confirm_kb(action: str, item_id: int) -> InlineKeyboardMarkup:
 def add_more_items() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text="➕ اقلام بیشتر", callback_data="inv:addmore"),
-        InlineKeyboardButton(text="✅ اتمام و ذخیره", callback_data="inv:finish")
+        _btn("➕ اقلام بیشتر", "inv:addmore"),
+        _btn("✅ اتمام و ذخیره", "inv:finish", "success")
     )
+    return kb.as_markup()
+
+
+def settings_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        _btn("🏢 نام شرکت",    "set:company"),
+        _btn("📞 تلفن",        "set:phone")
+    )
+    kb.row(
+        _btn("📍 آدرس",        "set:address"),
+        _btn("🌐 وب‌سایت",     "set:website")
+    )
+    kb.row(_btn("🖼 لوگوی شرکت", "set:logo", "success"))
+    kb.row(_btn("🔙 منوی اصلی",  "nav:main"))
     return kb.as_markup()
